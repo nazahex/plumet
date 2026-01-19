@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Strict Modern 2026 TsConfig",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "outDir": "./dist",
+    "rootDir": "./src",
+
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": false,
+    "emitDeclarationOnly": true,
+
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "useUnknownInCatchVariables": true,
+
+    "allowUnusedLabels": false,
+    "allowUnreachableCode": false,
+    "noFallthroughCasesInSwitch": true,
+    "allowImportingTsExtensions": true,
+    "allowJs": false,
+    "checkJs": false,
+    "resolveJsonModule": true,
+    "esModuleInterop": false,
+    "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
+
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+    "isolatedDeclarations": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+
+    "baseUrl": ".",
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuildinfo",
+
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [
+      "node",
+      "bun"
+    ]
+  },
+
+  "include": [
+    "./src/**/*.ts"
+  ],
+
+  "watchOptions": {
+    "synchronousWatchDirectory": true,
+    "excludeDirectories": [
+      "**/node_modules",
+      "**/.git",
+      "**/dist",
+      "**/build",
+      "**/.cache",
+      "**/.turbo"
+    ]
+  }
+}
