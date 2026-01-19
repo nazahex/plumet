@@ -36,6 +36,9 @@
       "recommended": true,
       "suspicious": {
         "noDoubleEquals": "error"
+      },
+      "complexity": {
+        "useLiteralKeys": "off"
       }
     }
   },
