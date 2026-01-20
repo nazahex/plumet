@@ -1,6 +1,6 @@
 {
   "name": "plumet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Plumet: A high-performance, compile-time CSS generator and CLI to transform strictly typed style contracts into static, deterministic CSS files",
   "license": "MIT",
   "type": "module",
@@ -47,7 +47,7 @@
     "dprint": "^0.51.1",
     "dts-bundle-generator": "^9.5.1",
     "lefthook": "^2.0.2",
-    "plumet": "^0.1.0",
+    "plumet": "^0.1.1",
     "turbo": "^2.7.2",
     "typescript": "^5.9.3"
   },
