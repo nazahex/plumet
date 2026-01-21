@@ -84,7 +84,27 @@ export default {
 };
 ```
 
-> **Note:** The `output` path is resolved relative to the location of `plumet.ts`.
+> [!Note]
+>
+> The `output` path is resolved relative to the location of `plumet.ts`.
+
+#### Omit Selectors
+
+If you need to suppress selectors from the generated CSS—say the `.socket` block or hover states handled elsewhere—use the `omit` array on each canvas config. Provide exact selectors or simple `*` globs, and Plumet skips any matching node (and its children) while still emitting the rest of the tree.
+
+```ts
+export default {
+  footer: footerStyle(
+    {
+      output: "./dist/footer.css",
+      omit: ["#footer .socket", "#footer .sections*", "#footer .sections a:hover"],
+    },
+    tokens,
+  ),
+}
+```
+
+Wildcard matches (`#footer .sections*`) let you drop entire branches while leaving other selectors intact, and selectors nested inside media queries, pseudo-classes, or `&` replacements respect the same list.
 
 ### 3. Build and Watch
 
@@ -102,9 +122,9 @@ bunx plumet build -e plumet.ts -w
 
 ## CLI Reference
 
-| Command | Option | Description |
-| - | | |
-| `build` | `--entry`, `-e` | Specifies the entry file (defaults to `plumet.ts`). |
+| Command | Option          | Description                                                                       |
+| ------- | --------------- | --------------------------------------------------------------------------------- |
+| `build` | `--entry`, `-e` | Specifies the entry file (defaults to `plumet.ts`).                               |
 | `build` | `--watch`, `-w` | Enables Watch Mode; observes changes in the entry and all imported style modules. |
 
 - **Automatic Directories:** Output paths are created automatically if they do not exist.
