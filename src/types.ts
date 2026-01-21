@@ -29,6 +29,8 @@ export interface PlumetStyle {
   [selector: string]: PlumetStyle | CSS.Properties | undefined
 }
 
+export type PlumetFormat = "default" | "minify" | "pretty"
+
 /**
  * Per-canvas configuration for the generator.
  *
@@ -39,6 +41,22 @@ export interface PlumetStyle {
  */
 export interface PlumetConfig {
   output: string
+  /**
+   * Optional list of selectors to omit entirely from the emitted CSS. Supports `*` glob.
+   * Examples: "#muelle .socket", ".socials svg", "#muelle .sections a:hover", "#muelle .sections*".
+   */
+  omit?: string[]
+}
+
+/**
+ * Global configuration that applies across all canvases.
+ */
+export interface PlumetGlobalConfig {
+  /**
+   * Formatting style for the generated CSS. "default" preserves the current compact layout,
+   * "minify" removes newlines, and "pretty" adds indentation for readability.
+   */
+  format?: PlumetFormat
 }
 
 /**
@@ -69,3 +87,11 @@ export interface PlumetCanvas {
  * ```
  */
 export type PlumetCanvasMap = Record<string, PlumetCanvas>
+
+/**
+ * Aggregated Plumet definition with shared config and canvases.
+ */
+export interface PlumetData {
+  config?: PlumetGlobalConfig
+  canvas: PlumetCanvasMap
+}
