@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, stat, writeFile } from "node:fs/promises"
 import { dirname, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
@@ -7,7 +7,7 @@ import { collectDependencies } from "./deps"
 import { compileCanvas } from "./generator"
 import type { Line, WatchEvent } from "./tui"
 import { createTui, gray, heading } from "./tui"
-import type { PlumetCanvas } from "./types"
+import type { PlumetCanvas, PlumetData, PlumetGlobalConfig } from "./types"
 import { watchLoop } from "./watch"
 
 function help(): void {
@@ -43,13 +43,34 @@ function isCanvas(value: unknown): value is PlumetCanvas {
   )
 }
 
-async function build(entryPath: string, watchMode: boolean, ui = createTui()) {
-  if (!watchMode) {
-    const infoLines: Line[] = [
-      { label: "entry", value: relative(process.cwd(), entryPath) || entryPath },
-    ]
-    ui.info(infoLines)
+function isCanvasMap(value: unknown): value is Record<string, PlumetCanvas> {
+  if (!value || typeof value !== "object") return false
+  const entries = Object.values(value as Record<string, unknown>)
+  return entries.every((item) => isCanvas(item))
+}
+
+function normalizePlumetData(
+  value: unknown,
+): { canvas: Record<string, PlumetCanvas>; config?: PlumetGlobalConfig } | undefined {
+  if (!value || typeof value !== "object") return undefined
+
+  const maybeData = value as PlumetData
+  if (maybeData.canvas && typeof maybeData.canvas === "object") {
+    if (maybeData.config === undefined) {
+      return { canvas: maybeData.canvas }
+    }
+    return { canvas: maybeData.canvas, config: maybeData.config }
   }
+
+  if (isCanvasMap(value)) {
+    return { canvas: value as Record<string, PlumetCanvas> }
+  }
+
+  return undefined
+}
+
+async function build(entryPath: string, watchMode: boolean, ui = createTui()) {
+  // Defer printing info until after the entry is loaded so we can show global format
 
   const errors: Line[] = []
   const done: Line[] = []
@@ -61,11 +82,21 @@ async function build(entryPath: string, watchMode: boolean, ui = createTui()) {
     : pathToFileURL(entryPath).href
 
   let canvasMap: Record<string, PlumetCanvas> | undefined
+  let globalConfig: PlumetGlobalConfig | undefined
 
   try {
     deps = await collectDependencies(entryPath)
     const loaded = await import(moduleUrl)
-    canvasMap = loaded?.default as Record<string, PlumetCanvas>
+    const normalized = normalizePlumetData(loaded?.default)
+    canvasMap = normalized?.canvas
+    globalConfig = normalized?.config
+    if (!watchMode) {
+      const infoLines: Line[] = [
+        { label: "entry", value: relative(process.cwd(), entryPath) || entryPath },
+        { label: "format", value: String(globalConfig?.format ?? "default") },
+      ]
+      ui.info(infoLines)
+    }
   } catch (error) {
     errors.push({ label: "invalid", value: (error as Error)?.message ?? "failed to load entry" })
     if (watchMode) {
@@ -80,7 +111,7 @@ async function build(entryPath: string, watchMode: boolean, ui = createTui()) {
   }
 
   if (!canvasMap || typeof canvasMap !== "object") {
-    errors.push({ label: "invalid", value: "default export must be a PlumetCanvas map" })
+    errors.push({ label: "invalid", value: "default export must be PlumetData" })
     if (watchMode) {
       watchEvents.push({ kind: "invalid", label: "invalid", value: errors[0]?.value ?? "" })
       ui.watch(watchEvents)
@@ -93,6 +124,7 @@ async function build(entryPath: string, watchMode: boolean, ui = createTui()) {
   }
 
   const baseDir = dirname(entryPath)
+  let totalBytes = 0
 
   for (const [name, canvas] of Object.entries(canvasMap)) {
     if (!isCanvas(canvas)) {
@@ -106,14 +138,24 @@ async function build(entryPath: string, watchMode: boolean, ui = createTui()) {
     }
 
     try {
-      const css = compileCanvas(canvas)
+      const css = compileCanvas(canvas, globalConfig)
       const outputPath = resolve(baseDir, canvas.config.output)
 
       await mkdir(dirname(outputPath), { recursive: true })
       await writeFile(outputPath, css, "utf8")
+      const st = await stat(outputPath)
+      const size = st.size ?? 0
+      totalBytes += size
 
       const shown = relative(process.cwd(), outputPath) || outputPath
-      const builtValue = `${name} ⇒ ${gray(shown)}`
+      const formatBytes = (b: number) => {
+        if (b < 1024) return `${b} B`
+        const kb = b / 1024
+        if (kb < 1024) return `${kb.toFixed(1)} KB`
+        return `${(kb / 1024).toFixed(1)} MB`
+      }
+
+      const builtValue = `${name} ⇒ ${gray(shown)} › ${gray(formatBytes(size))}`
       done.push({ label: "built", value: builtValue })
       watchEvents.push({ kind: "built", label: "built", value: builtValue })
     } catch (error) {
@@ -134,7 +176,7 @@ async function build(entryPath: string, watchMode: boolean, ui = createTui()) {
       ui.done(done)
     }
 
-    ui.summary({ files: done.length, errors: errors.length, warnings: 0 })
+    ui.summary({ files: done.length, errors: errors.length, warnings: 0, totalBytes })
 
     if (errors.length) {
       process.exitCode = 1
