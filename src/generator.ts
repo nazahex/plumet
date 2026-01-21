@@ -324,7 +324,18 @@ export function compileStyle(style: PlumetStyle, options?: CompileOptionsInput):
 }
 
 export function compileCanvas(canvas: PlumetCanvas, globalConfig?: PlumetGlobalConfig): string {
-  return compileStyle(canvas.style, { omit: canvas.config.omit, format: globalConfig?.format })
+  const omit = canvas.config?.omit
+  const format = globalConfig?.format
+  let options: CompileOptionsInput
+  if (omit != null && format != null) {
+    options = { omit, format }
+  } else if (omit != null) {
+    options = omit
+  } else if (format != null) {
+    options = { format }
+  }
+
+  return compileStyle(canvas.style, options)
 }
 
 export function compileCanvasMap(
