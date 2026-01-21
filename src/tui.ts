@@ -118,6 +118,7 @@ export interface Summary {
   files: number
   errors: number
   warnings: number
+  totalBytes?: number
 }
 
 /**
@@ -139,7 +140,16 @@ export function createTui() {
       printBlock("done", lines)
     },
     summary(meta: Summary): void {
-      const parts = [`${meta.files} files`, `${meta.errors} error`, `${meta.warnings} warning`]
+      const human = (b?: number) => {
+        if (!b && b !== 0) return undefined
+        if (b < 1024) return `${b} B`
+        const kb = b / 1024
+        if (kb < 1024) return `${kb.toFixed(1)} KB`
+        return `${(kb / 1024).toFixed(1)} MB`
+      }
+
+      const filePart = `${meta.files} files${meta.totalBytes ? ` (${human(meta.totalBytes)})` : ""}`
+      const parts = [filePart, `${meta.errors} error`, `${meta.warnings} warning`]
       console.log(`${label("summary")} - ${parts.join(" ┄ ")}`)
     },
     watch(events: WatchEvent[]): void {
