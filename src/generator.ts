@@ -1,15 +1,11 @@
 import type * as CSS from "csstype"
-import type { PlumetCanvas, PlumetCanvasMap, PlumetStyle } from "./types"
-
-type FrameKind = "rule" | "at"
-
-interface Frame {
-  kind: FrameKind
-  selector: string
-  style: PlumetStyle
-  keys: string[]
-  index: number
-}
+import type {
+  PlumetCanvas,
+  PlumetCanvasMap,
+  PlumetFormat,
+  PlumetGlobalConfig,
+  PlumetStyle,
+} from "./types"
 
 const kebabCache = new Map<string, string>()
 
@@ -65,155 +61,281 @@ function resolveSelector(parent: string, key: string): string {
   return key
 }
 
-function emitRule(selector: string, props: CSS.Properties, out: string[]): void {
-  if (!selector) return
+function globToRegex(glob: string): RegExp {
+  const escaped = glob.replace(/[\\^$+?.()|[\]{}-]/g, "\\$&")
+  const withWildcards = escaped.replace(/\*/g, ".*")
+  return new RegExp(`^${withWildcards}$`)
+}
+
+type CompileOptions = {
+  omit?: string[]
+  format?: PlumetFormat
+}
+
+type CompileOptionsInput = string[] | CompileOptions | undefined
+
+function normalizeOptions(options?: CompileOptionsInput): CompileOptions {
+  if (Array.isArray(options)) return { omit: options }
+  return options ?? {}
+}
+
+function collectDeclarations(props?: CSS.Properties): [string, string][] {
+  if (!props) return []
+  const entries: [string, string][] = []
+
+  for (const k in props) {
+    const v = props[k as keyof CSS.Properties]
+    if (v == null) continue
+    entries.push([kebabCase(k), String(v)])
+  }
+
+  return entries
+}
+
+function createOmitMatcher(omit?: string[]): (selector: string) => boolean {
+  const omitMatchers = (omit ?? []).map(globToRegex)
+  if (!omitMatchers.length) return () => false
+  return (selector: string) => omitMatchers.some((re) => re.test(selector))
+}
+
+function indent(depth: number, format: PlumetFormat): string {
+  if (format !== "pretty") return ""
+  return "  ".repeat(depth)
+}
+
+function writeRule(
+  out: string[],
+  selector: string,
+  declarations: [string, string][],
+  depth: number,
+  format: PlumetFormat,
+): void {
+  if (format === "pretty") {
+    const base = indent(depth, format)
+    out.push(base, selector, " {\n")
+    for (const [prop, value] of declarations) {
+      out.push(indent(depth + 1, format), prop, ": ", value, ";\n")
+    }
+    out.push(base, "}\n")
+    return
+  }
 
   out.push(selector, "{")
-
-  for (const k in props) {
-    const v = props[k as keyof CSS.Properties]
-    if (v == null) continue
-    out.push(kebabCase(k), ":", String(v), ";")
+  for (const [prop, value] of declarations) {
+    out.push(prop, ":", value, ";")
   }
-
-  out.push("}\n")
-}
-
-function emitDeclarations(props: CSS.Properties, out: string[]): void {
-  for (const k in props) {
-    const v = props[k as keyof CSS.Properties]
-    if (v == null) continue
-    out.push(kebabCase(k), ":", String(v), ";")
+  out.push("}")
+  if (format === "default") {
+    out.push("\n")
   }
 }
 
-/**
- * Compile a nested `PlumetStyle` tree into a CSS string. Traversal is iterative (stack-based)
- * and emits declarations when a `$` block is present.
- *
- * @example
- * ```ts
- * import { compileStyle } from "@plumet/css"
- *
- * const style: PlumetStyle = {
- *   "#app": {
- *     $: { color: "black" },
- *     a: { ":hover": { $: { textDecoration: "underline" } } },
- *   },
- * }
- *
- * const css = compileStyle(style)
- * ```
- */
-export function compileStyle(style: PlumetStyle): string {
-  if (!style) return ""
-
-  const out: string[] = []
-  const stack: Frame[] = [
-    {
-      kind: "rule",
-      selector: "",
-      style,
-      keys: Object.keys(style),
-      index: 0,
-    },
-  ]
-
-  while (stack.length > 0) {
-    const frame = stack[stack.length - 1]
-    if (!frame) break
-
-    if (frame.index === 0 && frame.style.$) {
-      if (frame.kind === "rule") {
-        emitRule(frame.selector, frame.style.$, out)
-      } else {
-        emitDeclarations(frame.style.$, out)
-      }
+function writeDeclarations(
+  out: string[],
+  declarations: [string, string][],
+  depth: number,
+  format: PlumetFormat,
+): void {
+  if (format === "pretty") {
+    for (const [prop, value] of declarations) {
+      out.push(indent(depth, format), prop, ": ", value, ";\n")
     }
+    return
+  }
 
-    if (frame.index >= frame.keys.length) {
-      if (frame.kind === "at") {
-        out.push("}\n")
-      }
-      stack.pop()
-      continue
-    }
+  for (const [prop, value] of declarations) {
+    out.push(prop, ":", value, ";")
+  }
+}
 
-    const key = frame.keys[frame.index++]
-    if (key === undefined) continue
-    if (key === "$") continue
+function wrapAtRule(name: string, body: string, depth: number, format: PlumetFormat): string {
+  if (!body) return ""
 
-    const child = frame.style[key]
+  if (format === "pretty") {
+    const base = indent(depth, format)
+    return `${base}${name} {\n${body}${base}}\n`
+  }
+
+  const newline = format === "default" ? "\n" : ""
+  return `${name}{${body}}${newline}`
+}
+
+function compileRuleNode(
+  selector: string,
+  style: PlumetStyle,
+  depth: number,
+  format: PlumetFormat,
+  isOmitted: (selector: string) => boolean,
+  out: string[],
+): boolean {
+  const startLength = out.length
+  const declarations = collectDeclarations(style.$)
+
+  if (declarations.length) {
+    writeRule(out, selector, declarations, depth, format)
+  }
+
+  const keys = Object.keys(style)
+  for (const key of keys) {
+    if (!key || key === "$") continue
+
+    const child = style[key]
     if (!child || typeof child !== "object") continue
 
     if (key.charCodeAt(0) === 64 /* @ */) {
-      out.push(key, "{")
+      const bodyParts: string[] = []
       const childStyle = child as PlumetStyle
-      stack.push({
-        kind: "at",
-        selector: frame.selector,
-        style: childStyle,
-        keys: Object.keys(childStyle),
-        index: 0,
-      })
+      const childDecl = collectDeclarations(childStyle.$)
+      if (childDecl.length) {
+        writeDeclarations(bodyParts, childDecl, depth + 1, format)
+      }
+
+      const childKeys = Object.keys(childStyle)
+      for (const childKey of childKeys) {
+        if (!childKey || childKey === "$") continue
+        const nested = childStyle[childKey]
+        if (!nested || typeof nested !== "object") continue
+
+        if (childKey.charCodeAt(0) === 64 /* @ */) {
+          const nestedBody = compileAtRule(
+            childKey,
+            nested as PlumetStyle,
+            selector,
+            depth + 1,
+            format,
+            isOmitted,
+          )
+          if (nestedBody) {
+            bodyParts.push(nestedBody)
+          }
+          continue
+        }
+
+        const nestedSelector = resolveSelector(selector, childKey)
+        if (isOmitted(nestedSelector)) {
+          continue
+        }
+
+        compileRuleNode(
+          nestedSelector,
+          nested as PlumetStyle,
+          depth + 1,
+          format,
+          isOmitted,
+          bodyParts,
+        )
+      }
+
+      const body = bodyParts.join("")
+      if (body) {
+        out.push(wrapAtRule(key, body, depth, format))
+      }
       continue
     }
 
-    const nextSelector = resolveSelector(frame.selector, key)
-    const childStyle = child as PlumetStyle
+    const nextSelector = resolveSelector(selector, key)
+    if (isOmitted(nextSelector)) {
+      continue
+    }
 
-    stack.push({
-      kind: "rule",
-      selector: nextSelector,
-      style: childStyle,
-      keys: Object.keys(childStyle),
-      index: 0,
-    })
+    compileRuleNode(nextSelector, child as PlumetStyle, depth, format, isOmitted, out)
+  }
+
+  return out.length > startLength
+}
+
+function compileAtRule(
+  name: string,
+  style: PlumetStyle,
+  parentSelector: string,
+  depth: number,
+  format: PlumetFormat,
+  isOmitted: (selector: string) => boolean,
+): string {
+  const bodyParts: string[] = []
+  const declarations = collectDeclarations(style.$)
+  if (declarations.length) {
+    writeDeclarations(bodyParts, declarations, depth + 1, format)
+  }
+
+  const keys = Object.keys(style)
+  for (const key of keys) {
+    if (!key || key === "$") continue
+    const child = style[key]
+    if (!child || typeof child !== "object") continue
+
+    if (key.charCodeAt(0) === 64 /* @ */) {
+      const nestedBody = compileAtRule(
+        key,
+        child as PlumetStyle,
+        parentSelector,
+        depth + 1,
+        format,
+        isOmitted,
+      )
+      if (nestedBody) {
+        bodyParts.push(nestedBody)
+      }
+      continue
+    }
+
+    const nextSelector = resolveSelector(parentSelector, key)
+    if (isOmitted(nextSelector)) {
+      continue
+    }
+
+    compileRuleNode(nextSelector, child as PlumetStyle, depth + 1, format, isOmitted, bodyParts)
+  }
+
+  const body = bodyParts.join("")
+  return wrapAtRule(name, body, depth, format)
+}
+
+/**
+ * Compile a nested `PlumetStyle` tree into a CSS string.
+ */
+export function compileStyle(style: PlumetStyle, options?: CompileOptionsInput): string {
+  if (!style) return ""
+
+  const { omit, format = "default" } = normalizeOptions(options)
+  const isOmitted = createOmitMatcher(omit)
+  const out: string[] = []
+
+  const keys = Object.keys(style)
+  for (const key of keys) {
+    if (!key || key === "$") continue
+    const child = style[key]
+    if (!child || typeof child !== "object") continue
+
+    if (key.charCodeAt(0) === 64 /* @ */) {
+      const body = compileAtRule(key, child as PlumetStyle, "", 0, format, isOmitted)
+      if (body) {
+        out.push(body)
+      }
+      continue
+    }
+
+    const selector = resolveSelector("", key)
+    if (isOmitted(selector)) continue
+    compileRuleNode(selector, child as PlumetStyle, 0, format, isOmitted, out)
   }
 
   return out.join("")
 }
 
-/**
- * Compile a single canvas into CSS using its style tree.
- *
- * @example
- * ```ts
- * import { compileCanvas } from "@plumet/css"
- *
- * const canvas: PlumetCanvas = {
- *   config: { output: "./dist/app.css" },
- *   style: { "#app": { $: { color: "black" } } },
- * }
- *
- * const css = compileCanvas(canvas)
- * ```
- */
-export function compileCanvas(canvas: PlumetCanvas): string {
-  return compileStyle(canvas.style)
+export function compileCanvas(canvas: PlumetCanvas, globalConfig?: PlumetGlobalConfig): string {
+  return compileStyle(canvas.style, { omit: canvas.config.omit, format: globalConfig?.format })
 }
 
-/**
- * Compile multiple canvases and return a map of names to CSS strings.
- *
- * @example
- * ```ts
- * import { compileCanvasMap } from "@plumet/css"
- *
- * const canvases = {
- *   header: { config: { output: "./header.css" }, style: { "#header": { $: { color: "red" } } } },
- *   footer: { config: { output: "./footer.css" }, style: { "#footer": { $: { color: "blue" } } } },
- * }
- *
- * const cssMap = compileCanvasMap(canvases)
- * ```
- */
-export function compileCanvasMap(canvasMap: PlumetCanvasMap): Record<string, string> {
+export function compileCanvasMap(
+  canvasMap: PlumetCanvasMap,
+  globalConfig?: PlumetGlobalConfig,
+): Record<string, string> {
   const result: Record<string, string> = {}
   for (const key of Object.keys(canvasMap)) {
     const canvas = canvasMap[key]
     if (!canvas) continue
-    result[key] = compileCanvas(canvas)
+    result[key] = compileCanvas(canvas, globalConfig)
   }
   return result
 }
